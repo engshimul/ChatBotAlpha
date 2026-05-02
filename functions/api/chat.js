@@ -13,18 +13,18 @@ export async function onRequest(context) {
   }
 
   if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+    return new Response(JSON.stringify({ error: "Method not allowed", reply: null }), {
       status: 405,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const apiKey = env.GEMINI_API_KEY;
-  console.log("API Key present:", !!apiKey);
+  const apiKey = env.OPENROUTER_API_KEY;
+  console.log("OpenRouter API Key present:", !!apiKey);
 
   if (!apiKey) {
     return new Response(
-      JSON.stringify({ error: "API key not configured", reply: null }),
+      JSON.stringify({ error: "API key not configured (OPENROUTER_API_KEY)", reply: null }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -40,43 +40,50 @@ export async function onRequest(context) {
       );
     }
 
-    const prompt = `You are ChatBotAlpha, a friendly and knowledgeable AI assistant. The user just said: "${message}"
+    const systemPrompt = `You are ChatBotAlpha, a friendly and knowledgeable AI assistant.
 
 Your job is to:
-1. Answer their question or respond to their message in 2-3 sentences - be helpful, warm, and accurate
-2. Then ask them a relevant, engaging follow-up question to keep the conversation going
-3. Format: First answer, then the follow-up question. Keep total response concise (3-4 sentences max)
+1. Answer the user's message in 2-3 sentences — be helpful, warm, and accurate
+2. Then ask a relevant, engaging follow-up question to keep the conversation going
+3. Keep total response concise (3-4 sentences max)
 
 Be conversational, curious, and engaging.`;
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 200 },
-        }),
-      }
-    );
+    console.log("Calling OpenRouter API...");
+    const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://chatbotalpha.pages.dev",
+        "X-Title": "ChatBotAlpha",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.0-flash-001",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message },
+        ],
+        temperature: 0.7,
+        max_tokens: 200,
+      }),
+    });
 
-    const geminiData = await geminiRes.json();
-    console.log("Gemini status:", geminiRes.status);
-    console.log("Gemini response:", JSON.stringify(geminiData).substring(0, 300));
+    const orData = await openRouterRes.json();
+    console.log("OpenRouter status:", openRouterRes.status);
+    console.log("OpenRouter response:", JSON.stringify(orData).substring(0, 300));
 
-    if (!geminiRes.ok) {
+    if (!openRouterRes.ok) {
       return new Response(
         JSON.stringify({
-          error: "Gemini API error: " + (geminiData.error?.message || "Unknown"),
+          error: "OpenRouter API error: " + (orData.error?.message || JSON.stringify(orData)),
           reply: null,
         }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const reply =
-      geminiData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+    const reply = orData.choices?.[0]?.message?.content?.trim() ||
       "That's interesting! Tell me more about it.";
 
     console.log("Reply:", reply.substring(0, 100));
